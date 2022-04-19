@@ -1,0 +1,702 @@
+---
+title: "EDA - EU Superstore Data"
+author: "Muhammad Tayyab"
+date: "3/28/2022"
+output: html_document
+---
+
+## Setup
+
+### Load Packages
+
+```{r load-packages, message = FALSE}
+library(plotly)
+library(tidyverse)
+library(pheatmap)
+library(readxl)
+library(mapdata)
+library(gridExtra)
+options(scipen = 999)
+```
+
+### Load data
+
+```{r load-data}
+Sample_EU_Superstore <- read_excel("Sample - EU Superstore.xls")
+```
+
+## Dataset Summuary
+
+The summary of numeric variables in this data set is:
+
+```{r}
+
+graph_profit <- ggplot(Sample_EU_Superstore, aes(y = Profit)) +
+  geom_boxplot()
+graph_sales <- ggplot(Sample_EU_Superstore, aes(y = Sales)) +
+  geom_boxplot()
+graph_discount <- ggplot(Sample_EU_Superstore, aes(y = Discount)) +
+  geom_boxplot()
+graph_quantity <- ggplot(Sample_EU_Superstore, aes(y = Quantity)) +
+  geom_boxplot()
+grid.arrange(graph_sales, graph_profit,graph_discount,graph_quantity, ncol = 4)
+
+summary(Sample_EU_Superstore$Sales)
+summary(Sample_EU_Superstore$Quantity)
+summary(Sample_EU_Superstore$Discount)
+summary(Sample_EU_Superstore$Profit)
+
+```
+
+
+## Superstore Category Counts
+
+```{r}
+ggplotly(
+  ggplot(Sample_EU_Superstore, aes(x = Category, fill = Category)) +
+           geom_bar() +
+  labs(x = "Category", y = "Frequency",
+       title = "Frequency of Category"))
+```
+
+Analysis: This bar plot represent that superstore has Office Supplies more than Technology and Furniture.
+
+## Sub-Category Counts
+
+```{r}
+  ggplotly(
+    ggplot(data = Sample_EU_Superstore, aes(x = `Sub-Category`, fill = `Sub-Category`)) +
+      geom_bar() +
+      theme(axis.text.x = element_text(angle = 90)) +
+      labs(x = "SUb Category", y = "Frequency", title = "Frequency of SUb-Category")
+  )
+```
+
+Analysis: This graph shows that the super store has a wide variety of products Art, Binder, and Storage in Sub-Category.
+
+## Percnetage of Sub-Category w.r.t Country:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(Country, `Sub-Category`) |>
+  dplyr::summarise(n = n()) |>
+  group_by(Country) |>
+  mutate(perc = n / sum(n)) -> perc_subctgry_country
+
+ggplotly(
+  ggplot(perc_subctgry_country, aes(x = `Sub-Category`, y = perc, fill = Country)) +
+    geom_col() +
+    facet_wrap(~ Country) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    labs(x= "Sub-Category", y = "Percentage", title = "Percentage of SUb Category in Each Country")
+)
+```
+
+
+Analysis: The percentage of Art, Binder, and Storage is greater in each Country.
+
+## Geographical Plot of Country-wise Sales:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(Country) |>
+  dplyr::summarise(total_sales = sum(Sales)) |>
+  arrange(desc(total_sales)) -> countrywise_sales
+data.table::data.table(countrywise_sales)
+
+```
+
+```{r }
+worldmap <- map_data("world")
+colnames(countrywise_sales) = c("region", "values")
+country_map <- countrywise_sales |>
+  left_join(worldmap, countrywise_sales, by = "region")
+country_map <- country_map |>
+  filter(!is.na(country_map$values))
+centroid <- aggregate(cbind(long, lat) ~ region, data = country_map, FUN = mean)
+
+ggplotly(
+  ggplot(data = country_map, aes(x = long, y = lat)) +
+  geom_polygon(aes(fill = values), alpha = 0.7) +
+    geom_text(data = centroid, aes(x = long, y = lat, label = region)) +
+    coord_equal() +
+    labs(title = "Geographical Distribution of Sales Value")
+)
+```
+
+Analysis: The value of Sales are greater in France, United Kingdom, and German, so we should expand our products in these countries.
+
+## Sales Value w.r.t Region
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(Region) |>
+  summarise(total_sales = sum(Sales))  -> regionwise_sales
+data.table::data.table(regionwise_sales)
+```
+
+```{r}
+regionwise_sales |>
+  mutate(Region = factor(Region, levels = c("Central", "North", "South")),
+         cumulative = cumsum(total_sales),
+         midpoint = cumulative - total_sales /2,
+         label = paste0(Region, " ", round(total_sales / sum(total_sales) * 100, 1), "%")) |>
+  arrange(desc(Region)) -> regionwise_sales
+
+ggplot(regionwise_sales, aes(x = 1, weight = total_sales, fill = Region)) +
+   geom_bar(width = 1, position = "stack") +
+   coord_polar(theta = "y") +
+   geom_text(aes(x = 1.1, y = midpoint, label = label)) +
+  theme_void() +
+  labs(title = "Percentage of Sales Value Contributed in Each Region")
+```
+
+Analysis: Most of the sales value are generating from Central Region.
+
+As the total sales value is greater in Central region, so lets deep dive to check which country, state, and city have greater sales value and sub-category products distribution in Central region
+
+## Sales values of Countries in Central region
+
+```{r}
+Sample_EU_Superstore |> 
+  filter(Region == "Central") |>
+  group_by(Country) |>
+  summarise(total_sales = sum(Sales)) -> central_countries_sales
+
+ggplotly(
+  ggplot(central_countries_sales, aes(x = Country, y = total_sales, fill = Country)) +
+    geom_col() +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(y = "Total Sales Value", x = "Countries of Central Region", title = "Sales Value Distribution in Each Country of Central Region")
+)
+```
+
+
+Analysis: As the sales value and sub category product distribution percentage is greater in France, so again dive in France to see insights.
+
+## Visualizing the Sales Value in states of France:
+
+```{r}
+Sample_EU_Superstore |>
+  filter(Region == "Central", Country == "France") |>
+  group_by(State) |>
+  summarise(total_sales = sum(Sales)) -> france_state_salesvalue
+
+ggplotly(
+  ggplot(france_state_salesvalue, aes(x = State, y = total_sales, fill = State)) +
+    geom_col(stat = "identity") +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(x = "States of France", y = "Total Sales ", title = "Sales Value Distribution in Each States of France")
+)
+  
+```
+
+Analysis: The sales value is greater in Ile-de-France state of France.
+
+
+## Visualizing the sales value w.r.t Sub Category in each Category
+
+```{r}
+Sample_EU_Superstore |> 
+  group_by(Category, `Sub-Category`) |> 
+  summarise(sales_value = sum(Sales)) |> 
+  ggplot(aes(x = Category, fill = `Sub-Category`, y = sales_value)) +
+  geom_col(stat = "identity", col = "black") +
+  labs(x = "Category", y = "Total Sales Value", title = "Total Sales Value of Sub-Category in Each Category") -> plt_cat_subCat_val
+plotly::ggplotly(plt_cat_subCat_val)
+```
+
+Analysis: The sales value of Bookcases is greater in Furniture, the sales value of Storage is greater in Office Supplies, and the sales values of Copiers and Phone is greater in Technology.
+
+## Popularity of Sub-Category in each Category:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(Category, `Sub-Category`) |>
+  summarise(frequency = n()) -> popular_subctgry
+
+ggplotly(
+  ggplot(data = popular_subctgry, aes(x = Category, y = frequency, fill = `Sub-Category`)) +
+    geom_bar(stat = "identity", col = "white") +
+    labs(title = "Popularity of Sub Categories in Each Category")
+)
+  
+```
+
+Analysis: The frequency of Bookcases is greater in Furniture,  Art in Office Supplies, and Copiers and Phone in Technology.
+
+## Visualizing the total sales and profit by sub category
+
+Total sales and its profit by sub category is:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(`Sub-Category`) |>
+  summarise(total_prof = sum(Profit),
+            total_sales = sum(Sales))  -> prof_sales_subcategory
+prof_sales_subcategory |>
+  pivot_longer(total_prof:total_sales,
+               names_to = "key",
+               values_to = "value") -> prof_sales_subcategory
+ggplotly(
+  ggplot(prof_sales_subcategory, aes(x = `Sub-Category`, fill = key, y = value)) +
+    geom_bar(stat = 'identity', position = "dodge") +
+    theme(axis.text.x = element_text(angle = 90)) +
+    labs(title = "Total Profit and Total Sales in Each Category")
+)
+```
+
+Analysis: Highest profit is earned in Bookcases, copiers and appliances while selling price for copiers, phones, bookcases, and storage are extremely high compared to other products.
+
+Another analysis is people don't prefer to buy Tables from superstore and due to discount, its profit rate is negative. Hence these departments are in loss
+
+## Finding the cost
+
+```{r}
+cost_eu_superstore <- Sample_EU_Superstore |>
+  mutate(cost = Sales - Profit) |>
+  group_by(`Sub-Category`) |>
+  summarise(total_cost = sum(cost))
+ggplotly(
+  ggplot(cost_eu_superstore, aes(x = `Sub-Category`, y = total_cost, fill = `Sub-Category`)) +
+    geom_bar(stat = 'identity') +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(x = "Sub Category", y = "Total Cost", title = "Total Costs in Each Sub Category")
+)
+```
+
+Analysis: Retailers spend more cost on copiers,Phones, Storage, and bookcases
+
+## Count of Segmentation
+
+```{r}
+ggplotly(
+  ggplot(Sample_EU_Superstore, aes(x = Segment, fill = Segment)) +
+    geom_bar() +
+    labs(x = "Segment", y = "Frequency", title = "Popularity of Segment")
+)
+```
+
+Analysis: The consumer segment is more preferable.
+
+## Calculating Profit gained in each sub-category by segmentwise
+
+```{r}
+prof_segment_subcat <- Sample_EU_Superstore |>
+  select(Segment, `Sub-Category`, Profit) |>
+  group_by(Segment, `Sub-Category`) |>
+  summarise(total_prof = sum(Profit)) |>
+  pivot_longer(Segment,
+               values_to = "segment")
+
+ggplotly(
+  ggplot(prof_segment_subcat, aes(x = `Sub-Category`, fill = segment, y = total_prof)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(x = "Sub Category", y = "Total Profit", title = "Total Profit of Sub Category in Each Segment")
+)
+```
+
+Analysis: The above graph represents that the profit rate of consumers in each sub-category is greater, so we can do much focus on this segment than Corporate, and Home Office.
+
+## Ship Mode Preferences
+
+```{r}
+
+ship_mode_sales <- Sample_EU_Superstore |>
+  group_by(`Ship Mode`) |>
+  summarise(total_sales = sum(Sales)) 
+
+ggplotly(
+  ggplot(ship_mode_sales, aes(x = `Ship Mode`, y = total_sales, fill = `Ship Mode`)) +
+    geom_bar(stat = "identity") +
+    labs(x = "Ship Mode", y = "Total Sales Value", title = "Total Sales Value in Each Ship Mode")
+)
+
+```
+
+Analysis: People tend to prefer Standard Class mode of shipping so we should much focus on vehicles use for standard class mode of shipping.
+
+## Profit w.r.t Ship Mode
+
+```{r, message=FALSE }
+ship_mode_profit <- Sample_EU_Superstore |>
+  group_by(Category,`Ship Mode`) |>
+  summarise(total_profit = sum(Profit))
+
+
+ship_mode_profit |>
+  ggplot(aes(x = `Ship Mode`, y = total_profit, fill = `Ship Mode`)) +
+  geom_col(width = 0.5) +
+  facet_wrap(~ Category) +
+  theme_dark() +
+  labs(x = "Shipping Mode", y = "Product Profit", title = "Shipping Models for profit") +
+  theme(axis.text = element_text(size = 12, face = "bold"), title = element_text(size = 16)) +
+  theme(axis.text.x = element_text(angle = 45, size = 12, face = "bold"))
+  theme(legend.title = element_text(size = 10), legend.text = element_text(size = 10), legend.position = "bottom")
+
+```
+
+Analysis: We see more profits/loss have been availed from the standard shipment class. But, there are not higher range profits seen this feature.
+
+
+## Effect of Invoice values after giving discount:
+
+```{r}
+Sample_EU_Superstore |> 
+    mutate(given_discount = Discount > 0) |>
+    mutate(discount_amount = ifelse(given_discount,
+                                    (Sales/(1 - Discount)) - Sales, 
+                                    0)) |> 
+    group_by(`Order ID`) |> 
+    summarise(invoice_value = sum(Sales),
+              discount_value = sum(discount_amount)) |> 
+    mutate(discount_given = discount_value > 0) -> transaction_discount
+    
+ggplotly(
+  ggplot(data = transaction_discount, aes(y = invoice_value, x = discount_given, color = discount_given)) +
+        geom_boxplot() +
+    labs(x = "Is Discount Given", y = "Invoice Value", title = "Effect of Invoice Values After Giving Discount")
+)
+```
+
+Analysis: The discount given in particular item of each invoice is beneficial for us as it increases the invoice value.
+
+It can also be possible that the count of discount given in each transaction is much greater that those transactions in which the discount is not given. In this way, the transaction values of discount given will apparently increase and it will lead to the bias.So we have to check the proportion of transactions of discount given and discount not given.
+
+## Verification of above result:
+
+```{r}
+ggplotly(
+  ggplot(data = transaction_discount, aes(x = discount_given, fill = discount_given)) +
+    geom_bar() +
+    labs(y = "Frequency", x = "Is Discount Given", title = "Count of Transaction in Which Discount Given")
+)
+```
+
+Analysis: So our previous analysis in boxplot is correct! The discount given in particular item of each invoice is beneficial for us as it increases the invoice value.
+
+## How much discount we should give:
+
+```{r}
+Sample_EU_Superstore |> 
+    mutate(given_discount = Discount > 0) |>
+    mutate(discount_amount = ifelse(given_discount,
+                                    (Sales/(1 - Discount)) - Sales, 
+                                    0)) |> 
+    group_by(`Order ID`) |> 
+    summarise(invoice_value = sum(Sales),
+              discount_value = sum(discount_amount)) |> 
+    mutate(discount_given = discount_value > 0,
+           p_discount = discount_value/(invoice_value + discount_value)) -> dscnt_invoice_relation
+
+ggplotly(
+  ggplot(dscnt_invoice_relation, aes(x = p_discount, y = invoice_value)) +
+    geom_point() +
+    labs(x = "Percentage of Discount Given", y = "Total Sales Value", title = "Effect of Sales Value After Giving Certain Percentage of Discount")
+)
+```
+
+Analysis: By increasing the discount, the value of invoices goes down. So we should not exceed our discount form 0.2 as most of the observations of higher invoice value lies between 0 and 0.2
+
+Analysis: After exceeding the discount of 0.3, our profit goes to the negative values.
+
+## Relation Between Sales and Profit:
+
+```{r}
+ggplotly(
+  ggplot(Sample_EU_Superstore, aes(x = Sales, y = Profit)) +
+    geom_hex() +
+    geom_smooth() +
+    labs(title = "Relationship Between Sales and Profit")
+)
+```
+
+Analysis: The Profit increase as the Sales increase.
+
+### RFM Analysis:
+
+```{r}
+date_today <- lubridate::ymd("20181231")
+Sample_EU_Superstore |>
+  mutate(given_discount = Discount > 0) |>
+  mutate(discount_amount = ifelse(given_discount,
+                                  (Sales/(1 - Discount)) - Sales, 
+                                  0)) |> 
+  mutate(order_date = strptime(`Order Date`, format = "%Y-%m-%d")) |>
+  group_by(`Customer ID`) |>
+  summarise(total_revenue = sum(Sales),
+            n_transactions = n_distinct(`Order ID`),
+            last_purchase_date = max(`Order Date`),
+            total_discount_amount = sum(discount_amount),
+            total_profit = sum(Profit)) |>
+  mutate(n_days_lastpurchase = difftime(date_today, last_purchase_date, units = "days"),
+         n_days_lastpurchase = as.integer(n_days_lastpurchase)) |>
+  janitor::clean_names() |> 
+  select(-(last_purchase_date)) |>
+  drop_na() -> df_rfm_eda_1
+
+df_rfm_eda_1 |>
+  mutate(monetary_rank = Hmisc::cut2(total_revenue, g = 5),
+         recency_rank = Hmisc::cut2(n_days_lastpurchase, g = 5),
+         frequency_rank = Hmisc::cut2(n_transactions, g = 5)) -> df_rfm_eda_2
+
+df_rfm_eda_2 |>
+  mutate(monetary_score = as.integer(monetary_rank),
+         frequency_score = as.integer(frequency_rank),
+         recency_score = as.integer(recency_rank)) |> 
+  mutate(recency_score = dense_rank(desc(recency_score))) ->df_rfm_eda_3
+
+df_rfm_eda_3 |>
+  dplyr::mutate(labels = ifelse(recency_score >= 4 & frequency_score >=4 & monetary_score >= 4,"Champions",
+                                ifelse(recency_score >= 2 & (frequency_score + monetary_score)/2 >= 3, "Loyal Customers",
+                                       ifelse(recency_score >=3 & (frequency_score + monetary_score)/2 >=1, "Potential Loyalists", 
+                                              ifelse(recency_score >= 4 & ((frequency_score + monetary_score)/2 <=1 & (frequency_score + monetary_score)/2 >=0) , "Recent_customers",
+                                                     ifelse((recency_score >=3 & recency_score <=4)  & ((frequency_score + monetary_score)/2 <=1 & (frequency_score + monetary_score)/2 >=0), "Promising",
+                                                            ifelse((recency_score >=1 & recency_score <=3) & ((frequency_score + monetary_score)/2 >=2 & (frequency_score + monetary_score)/2 <=3),"Need attention", 
+                                                                   ifelse(recency_score >=2 & recency_score <=3 & (frequency_score + monetary_score)/2 >=0 & (frequency_score + monetary_score)/2 <=2, "About to sleep",
+                                                                          ifelse(recency_score <=2 & frequency_score <=2 & monetary_score <=2, "Lost",
+                                                                                 ifelse((recency_score +  frequency_score)/2 <=2 & monetary_score >=4, "High spending new customer",
+                                                                                        ifelse(recency_score <2 & frequency_score >= 3 & monetary_score >= 3, "High value churned", 
+                                                                                               ifelse(recency_score <2 & frequency_score <2 & monetary_score >=3, "One time high spending churned",
+                                                                                                      ifelse(recency_score <2 & frequency_score >=4 & monetary_score <=3, "Low value loyal churned", ""))))))))))))) -> df_rfm_eda_4
+
+rfm_label <- data.frame(table(df_rfm_eda_4$labels))
+ggplotly(
+  ggplot(rfm_label, aes(x = Var1, y = Freq, fill = Var1)) +
+    geom_bar(stat = "identity") +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(y = "Frequency", x = "Customer Segments", title = "Popularity of Customer Segments")
+)
+```
+
+Analysis: We can apply different strategies and target these type of customers accordingly.We have the large amount of Loyal, Champion, and Potential Loyalist Customers which is good for the business but we have to focus on second last bar which contain those customers which need attention.
+
+## Revenue, Profit, and Discount from Each Customer Segment:
+
+```{r}
+df_rfm_eda_4 |>
+  group_by(labels) |>
+  summarise(total_discount = sum(total_discount_amount),
+            total_Profit = sum(total_profit),
+            total_Revenue = sum(total_revenue)) -> profit_discount_rev_rfm 
+profit_discount_rev_rfm |>
+  pivot_longer(total_discount:total_Profit:total_Revenue,
+               names_to = "key",
+               values_to = "value") -> pdr_rfm 
+ggplotly(
+  ggplot(pdr_rfm, aes(x = labels, y = value, fill = key)) +
+    geom_bar(position = "dodge", stat = "identity") +
+    theme(axis.text.x = element_text(angle = 45)) +
+    labs(x = "Customer Segments", y = "Value", title = "Total Discount, Profit, and Revenue of Each Customer Segment")
+)
+
+```
+
+Analysis: From this Graph, we can easily identity how much profit from revenue we generated after giving certain discount.
+
+## Distribution of customer labels w.r.t Country:
+
+```{r}
+customer_country <- Sample_EU_Superstore |>
+  select(`Customer ID`, Country)
+colnames(customer_country) = c("customer_id", "country")
+df_eda_country <- customer_country |>
+  left_join(df_rfm_eda_4, customer_country, by = "customer_id")
+
+distinct(df_eda_country, customer_id, .keep_all = TRUE) -> df_eda_country
+
+df_eda_country |>
+  group_by(country, labels) |>
+  count() -> plot_rfm_country
+ggplotly(
+  ggplot(plot_rfm_country, aes(x = labels, y = n, fill = labels)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~ country) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    labs(x = "Customer Segments", y = "Frequency", title = "Popularity of Customer Segments in Each Country")
+)
+```
+
+Analysis: Most of the loyal and champion customers lies in France, Germany and United Kingdom.
+
+## Sub-Category Distribution of CUstomer labels:
+
+```{r}
+
+customer_sub_category <- Sample_EU_Superstore |>
+  select(`Customer ID`, `Sub-Category`)
+colnames(customer_sub_category) = c("customer_id", "sub_category")
+df_eda_subcategory <- customer_sub_category |>
+  left_join(df_rfm_eda_4, customer_sub_category, by = "customer_id")
+distinct(df_eda_subcategory, customer_id, .keep_all = TRUE) -> df_eda_subcategory
+ggplotly(
+  ggplot(df_eda_subcategory, aes(x = sub_category, fill = labels)) +
+    geom_bar() +
+    facet_wrap(~ labels) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    labs(x = "Sub Category", y = "Frequency", title = "Popularity of Sub Category in Each Customer Segments")
+)
+```
+
+Analysis: The loyal and potential loyalists bought almost every sub-category products, while we can attract customer labels like Need attention and about to sleep by by giving some offers on those products which they bought in past.
+
+## Loyal Customers w.r.t Category:
+
+```{r}
+customer_category <- Sample_EU_Superstore |>
+  select(`Customer ID`, Category)
+colnames(customer_category) = c("customer_id", "category")
+df_eda_category <- customer_category |>
+  left_join(df_rfm_eda_4, customer_category, by = "customer_id")
+distinct(df_eda_category, customer_id, .keep_all = TRUE) -> df_eda_category
+filter(df_eda_category, labels == "Loyal Customers") -> df_eda_category
+df_eda_category |>
+  group_by(category) |>
+  count() -> df_eda_category
+ggplotly(
+  ggplot(data = df_eda_category, aes(x = category, y = n, fill = category)) +
+    geom_col(stat = "identity") +
+    labs(x = "Category", y = "Frequency", title = "Loyal Customers w.r.t Category")
+)
+```
+
+Analysis: Most of the loyal customers buy office supplies products.
+
+## Loyal Customers w.r.t Segment:
+
+```{r}
+customer_segment <- Sample_EU_Superstore |>
+  select(`Customer ID`, Segment)
+colnames(customer_segment) = c("customer_id", "segment")
+df_eda_segment <- customer_segment |>
+  left_join(df_rfm_eda_4, customer_segment, by = "customer_id")
+distinct(df_eda_segment, customer_id, .keep_all = TRUE) -> df_eda_segment
+filter(df_eda_segment, labels == "Loyal Customers") -> df_eda_segment
+df_eda_segment |>
+  group_by(segment) |>
+  count() -> df_eda_segment
+pie(df_eda_segment$n, labels = df_eda_segment$segment, main = "Loyal Customers w.r.t Segment")
+
+```
+
+Analysis: Most of the Loyal Customers lies in Consumer Segment. 
+
+## Busy Days in Weeks of years
+
+```{r setup, warning=FALSE, message= FALSE, fig.width= 10}
+Sample_EU_Superstore |>
+  mutate(order_date = strptime(`Order Date`, format = "%Y-%m-%d"),
+         year = lubridate::year(order_date),
+         month = lubridate::month(order_date, label = TRUE, abbr = FALSE),
+         day = lubridate::wday(order_date, label = TRUE, abbr = TRUE),
+         week_year = lubridate::week(lubridate::ymd(order_date))) |>
+  group_by(week_year, day) |>
+  dplyr::summarise(total_sales = sum(Sales)) -> week_year_trend
+
+p <- ggplot(week_year_trend, aes(x = week_year, y= day, fill = total_sales)) + 
+  geom_tile(colour = "white") + scale_fill_gradient(low="white", high="green") +  xlab("Week of Month") + ylab("") + ggtitle("Time-Series Calendar Heatmap: SuperStore Sales") + labs(fill = "Sales")
+ggplotly(p)
+```
+
+Analysis: Most of the sales happens in Saturday, Sunday, and Monday.
+
+## Average Life Span of Customers in Month:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(`Customer ID`) |>
+  summarise(monthly_lifespan = difftime(max(`Order Date`), min(`Order Date`), units = "days")) |> 
+  mutate(monthly_lifespan = round(as.integer(monthly_lifespan / 30))) -> cust_monthly_lifespan
+
+ggplotly(
+  ggplot(cust_monthly_lifespan |>
+           filter(monthly_lifespan > 0),
+         aes(x = monthly_lifespan)) +
+    geom_bar(fill = "steelblue") +
+    labs(x = "Monthly Lifespan", y = "Number of Customers", title = "Average Lifespan of Customers in Months")
+  
+)
+
+```
+
+Analysis: Most the Customers are engage with our business till the greater than 20 months.
+
+## Average Lifespan of Customers in Months of Each Region:
+
+```{r}
+Sample_EU_Superstore |>
+  group_by(Region, `Customer ID`) |>
+  summarise(monthly_lifespan = difftime(max(`Order Date`), min(`Order Date`), units = "days")) |> 
+  mutate(monthly_lifespan = round(as.integer(monthly_lifespan / 30))) -> cust_region_monthly_lifespan
+
+ggplotly(
+  ggplot(cust_region_monthly_lifespan |>
+           filter(monthly_lifespan > 0),
+         aes(x = monthly_lifespan, fill = Region)) +
+    geom_bar() +
+    facet_wrap(~ Region) +
+    labs(x = "Monthly Lifespan", y = "Number of Customers", title = "Average Lifespan of Customers in Months of each region")
+)
+
+```
+
+Analysis: Most of the customers who engage with over business comes from central region.
+
+## Sales Trend In Over Year:
+
+```{r}
+Sample_EU_Superstore |>
+  mutate(year = lubridate::year(`Order Date`)) |>
+  group_by(year) |>
+  summarise(Total_Revenue = sum(Sales)) -> yearly_revenue
+
+ggplotly(
+  ggplot(data = yearly_revenue, aes(x = year, y = Total_Revenue)) +
+    geom_point(col = "yellow", size = 4)+
+    geom_line(col = "green") +
+    labs(x = "Year", y = "Total Revenue", title = "Sales Trend Over Years")
+)
+```
+
+Analysis: The total revenue is greater in 2018 and the line is in increasing order.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Year-wise and month-wise transaction trends:
+
+```{r}
+Sample_EU_Superstore |>
+  mutate(order_date = strptime(`Order Date`, format = "%Y-%m-%d"),
+         year = lubridate::year(order_date),
+         month = lubridate::month(order_date, label = TRUE, abbr = FALSE),
+         day = lubridate::day(order_date)) -> Sample_EU_Superstore
+
+Sample_EU_Superstore |>
+  group_by(year, month) |>
+  summarise(transaction_value = sum(Sales)) |>
+  ggplot(aes(x = month, y = transaction_value, group = as.factor(year), color = as.factor(year))) +
+  geom_line() +
+  geom_point(col = "black", size = 1) +
+  xlab("Month") +
+  ylab("Transaction Value") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  labs(title = "Variation of Transaction Value in Each Month") ->transaction_trend
+ggplotly(transaction_trend)
+```
+
+Analysis: This barplot is showing the dominant sub-categories' transaction value in each year.
+
